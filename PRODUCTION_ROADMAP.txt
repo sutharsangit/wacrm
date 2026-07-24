@@ -1,0 +1,74 @@
+========================================================================
+             PRODUCTION DEPLOYMENT ROADMAP - WHATSAPP CRM
+========================================================================
+
+This document outlines the current state of the WhatsApp Business Integration
+module and details the changes required to transition from the sandbox mock 
+implementation to a production environment.
+
+------------------------------------------------------------------------
+I. CURRENT SANDBOX STATE (MOCK IMPLEMENTATIONS)
+------------------------------------------------------------------------
+* Frontend:
+  - Sidebar: Renamed link from "WhatsApp CRM" to "WhatsApp" under /whatsapp.
+  - Multi-page workspace: Created 9 sub-pages (Overview, Connect Number, Inbox, 
+    Broadcast, AI Qualification, Templates, Contacts, Campaigns, Settings).
+  - State: Integrates with Zustand stores and local state simulations.
+  
+* Backend:
+  - Sub-routers: Custom Express routers mapped for /whatsapp, /broadcast, 
+    /campaigns, /contacts, and /qualification.
+  - Mock Responses: All 10 API placeholders return static, pre-defined JSON 
+    data payloads (conversations list, campaign history counters, OTP status, 
+    qualification scoring metrics).
+  - Database bypass: Startup connection bypass configured to prevent Nodemon 
+    crashing in development mode when PostgreSQL or Docker is offline.
+
+------------------------------------------------------------------------
+II. PRODUCTION BACKEND CHANGES REQUIRED
+------------------------------------------------------------------------
+To connect your app to the live Meta WhatsApp Business API:
+
+1. Code Integrations:
+   - Live Message Dispatcher: In 'POST /whatsapp/send', replace mock payload 
+     with an Axios request calling the official Meta Graph API:
+     https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages
+     Header: Authorization: Bearer {META_WHATSAPP_TOKEN}
+     
+   - Live Webhook Verification: Implement standard GET query verification 
+     challenge matching the verify token in your Meta App config dashboard.
+     
+   - Inbound Webhook Parser: Create POST webhook event parsing. Intercept 
+     Meta's message event stream ('messages[0].text.body'), record the chat 
+     thread in PostgreSQL, send an alert notification, and trigger the AI.
+     
+   - WebSockets (Real-time): Integrate Socket.io on the backend. Emit a 
+     message event to the browser when the WhatsApp webhook receives an 
+     inbound message, updating the salesperson's CRM inbox live.
+     
+   - AI Lead Qualification Engine: Integrate the Gemini / OpenAI SDK inside 
+     qualification endpoints. Prompt the model using your builder's 
+     question schema, evaluate customer text answers, compute a score (0-100), 
+     and assign qualification status (Hot, Warm, Cold) in PostgreSQL.
+     
+   - Broadcast Campaigns Dispatcher: Program BullMQ workers to parse target 
+     contact pools on broadcast creation, sending API templates at a rate 
+     conforming to your Meta Messaging Tier.
+
+2. Infrastructure & Environment Configurations:
+   - Provision Managed Database: Deploy PostgreSQL and Redis on cloud platforms 
+     (e.g., Supabase, Neon, Render, Upstash Redis).
+     
+   - Environment Variables: Bind variables directly on the cloud host settings 
+     (Do not upload .env to Git):
+     * NODE_ENV=production
+     * DATABASE_URL=postgresql://{user}:{password}@{host}/{db}
+     * REDIS_HOST={redis-endpoint}
+     * JWT_SECRET={random-64-character-hex-string}
+     * META_WHATSAPP_TOKEN={meta-permanent-system-user-token}
+     * RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET (Live credentials)
+     * RESEND_API_KEY (Live mail key)
+     
+   - SSL Tunnels / reverse proxy: Host behind an SSL certificate (Nginx, ALB, 
+     Cloudflare) to handle incoming Meta secure Webhook requests.
+
